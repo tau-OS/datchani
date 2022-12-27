@@ -1,8 +1,8 @@
 # Datchani (ดัชนี) - A Certain Magical Indexer
 Datchani is a filesystem indexer written in Rust. It is designed to be fast, lightweight, and powerful.
 
-> > Note:
-> > Datchani is still in early development. It is not yet ready for production use.
+> **Note**
+> Datchani is still in early development. It is not yet ready for production use.
 
 ## Features
 - Indexes files and directories
