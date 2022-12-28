@@ -13,3 +13,6 @@ Cargo.lock
 # Added by cargo
 
 /target
+
+# since datchani still uses JSON databases for now, we need to ignore it
+/index.json
