@@ -1,15 +1,15 @@
+mod db;
 mod errors;
 mod files;
 mod query;
-mod db;
 
 use std::env;
 use walkdir::WalkDir;
 
 use color_eyre::Result;
-use tracing::{info};
+use tracing::info;
 
-use crate::query::fuzzy_match;
+use crate::query::{fuzzy_match, query};
 
 fn main() -> Result<()> {
     // default level is debug
@@ -52,9 +52,8 @@ fn main() -> Result<()> {
 
     // let f = files::Index::load(env::current_dir().unwrap().join("index.json"))?;
     // debug!("Loaded index: {:#?}", f);
-    let query = query::parse_query("release nix").unwrap();
-    fuzzy_match(&query, &index);
-
-
+    let search_query = query::parse_query("release extension:rlib").unwrap();
+    let res = query(&search_query, &index);
+    println!("{:#?}", res);
     Ok(())
 }

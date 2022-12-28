@@ -11,7 +11,7 @@
 //
 // Path: src/query.rs
 
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, path::PathBuf};
 
 use fuzzy_matcher::FuzzyMatcher;
 // let's use nom to parse the query, and skim to do the fuzzy matching
@@ -23,7 +23,7 @@ use nom::{
 
 use color_eyre::Result;
 
-use crate::files::Index;
+use crate::files::{Index, IndexedFile};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Term {
@@ -35,6 +35,54 @@ pub enum Term {
     Mime(String),
     // unimplemented
     Tag(String),
+}
+
+impl Term {
+    pub fn match_rules(&self, file: &IndexedFile) -> bool {
+        match self {
+            Term::NormalFuzzy(s) => {
+                let path = file.path.to_str().unwrap();
+                let matcher = fuzzy_matcher::skim::SkimMatcherV2::default()
+                    .smart_case()
+                    .debug(false);
+                let score = matcher.fuzzy_match(s, path);
+                score.is_some()
+            }
+            Term::Prefix(s) => file
+                .path
+                .file_name()
+                .unwrap_or_default()
+                .to_str()
+                .unwrap()
+                .starts_with(s),
+            Term::Suffix(s) => file
+                .path
+                .file_name()
+                .unwrap_or_default()
+                .to_str()
+                .unwrap()
+                .ends_with(s),
+            Term::SuffixName(s) => {
+                let name = {
+                    if let Some(name) = file.path.file_stem() {
+                        name.to_str().unwrap().split('.').next().unwrap()
+                    } else {
+                        file.path.file_name().unwrap().to_str().unwrap()
+                    }
+                };
+                name.ends_with(s)
+            }
+            Term::Extension(s) => {
+                if let Some(ext) = file.path.extension() {
+                    ext.to_str().unwrap() == s
+                } else {
+                    false
+                }
+            }
+            Term::Mime(s) => file.data_type == Some(s.clone()),
+            Term::Tag(s) => unimplemented!(),
+        }
+    }
 }
 
 // our control group
@@ -206,7 +254,7 @@ pub fn parse_query(query: &str) -> Result<Query> {
 
 // let's use skim to match the queries
 
-pub fn fuzzy_match(query: &Query, file: &Index) -> Vec<(i64, String)> {
+pub fn fuzzy_match(query: &Query, idx: &Index) -> Vec<(i64, String)> {
     // println!("Loaded index: {:#?}", file);
     // get the NormalFuzzy terms
     let (includes, _excludes): (Vec<_>, Vec<_>) = query
@@ -225,7 +273,7 @@ pub fn fuzzy_match(query: &Query, file: &Index) -> Vec<(i64, String)> {
     // println!("includes: {:#?}", includes);
 
     // turn the index into a vec of strings
-    let index = file
+    let index = idx
         .files
         .iter()
         .map(|file| file.path.to_string_lossy().to_string())
@@ -257,6 +305,41 @@ pub fn fuzzy_match(query: &Query, file: &Index) -> Vec<(i64, String)> {
         .map(|(k, v)| (v, k.to_owned()))
         .collect::<Vec<_>>();
     matches.sort_by(|a, b| b.0.cmp(&a.0));
-    println!("{:#?}", matches);
+    // println!("{:#?}", matches);
+    matches
+}
+
+// The actual query function
+pub fn query(query: &Query, index: &Index) -> Vec<(i64, IndexedFile)> {
+    // first, let's try to match the query with fuzzy matching
+    let matches = fuzzy_match(query, index);
+    // println!("{:#?}", matches);
+
+    // now we can map it into the actual Index struct
+    let mut matches = matches
+        .into_iter()
+        .map(|(score, path)| (score, index.get_file(PathBuf::from(path)).unwrap()))
+        .filter(|(_, file)| {
+            // filter out the rules
+            let mut include = false;
+            for term in &query.excludes {
+                if term.match_rules(file) {
+                    return false;
+                }
+            }
+            {
+                for term in &query.includes {
+                    if term.match_rules(file) {
+                        include = true;
+                    }
+                }
+            }
+            include
+        })
+        .map(|(score, file)| (score, file.clone()))
+        .collect::<Vec<_>>();
+
+    // sort the matches by score
+    // matches.sort_by(|a, b| b.0.cmp(&a.0));
     matches
 }

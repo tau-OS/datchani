@@ -57,6 +57,11 @@ impl Index {
         }
     }
 
+
+    pub fn get_file(&self, path: PathBuf) -> Option<&IndexedFile> {
+        self.files.iter().find(|f| f.path == path)
+    }
+
     pub fn add_file(&mut self, path: PathBuf) -> Result<()> {
         let file = IndexedFile::new(path)?;
         self.files.push(file);
