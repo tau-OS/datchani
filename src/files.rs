@@ -94,6 +94,7 @@ pub struct IndexedFile {
     // optional because sometimes we don't know the type
     #[serde(skip_serializing_if = "Option::is_none")]
     pub data_type: Option<String>,
+    pub tags: Vec<String>,
 }
 
 impl Default for IndexedFile {
@@ -102,6 +103,7 @@ impl Default for IndexedFile {
             path: PathBuf::new(),
             file_type: FileType::Regular,
             data_type: None,
+            tags: Vec::new(),
         }
     }
 }
@@ -127,6 +129,7 @@ impl IndexedFile {
             path,
             file_type,
             data_type,
+            tags: Vec::new(),
         })
     }
 

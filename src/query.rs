@@ -27,26 +27,34 @@ use crate::files::{Index, IndexedFile};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Term {
+    /// Match by fuzzy search
     NormalFuzzy(String),
+    /// Match by the prefix of the file name, including the extension
     Prefix(String),
+    /// Match by the suffix of the file name, including the extension
     Suffix(String),
+    /// Match by the suffix of the file name, without the extension
     SuffixName(String),
+    /// Match by file extension
     Extension(String),
+    /// Matches by MIME type
     Mime(String),
-    // unimplemented
+    /// Matches by tag
     Tag(String),
+    /// Match by exact string
+    Exact(String),
 }
 
 impl Term {
     pub fn match_rules(&self, file: &IndexedFile) -> bool {
         match self {
-            Term::NormalFuzzy(s) => {
-                let path = file.path.to_str().unwrap();
-                let matcher = fuzzy_matcher::skim::SkimMatcherV2::default()
-                    .smart_case()
-                    .debug(false);
-                let score = matcher.fuzzy_match(s, path);
-                score.is_some()
+            Term::NormalFuzzy(_) => {
+                // we have already done the fuzzy matching in the query parser
+                true
+            }
+            Term::Exact(s) => {
+                let name = file.path.file_name().unwrap().to_str().unwrap();
+                name.contains(s)
             }
             Term::Prefix(s) => file
                 .path
@@ -80,7 +88,9 @@ impl Term {
                 }
             }
             Term::Mime(s) => file.data_type == Some(s.clone()),
-            Term::Tag(s) => unimplemented!(),
+            Term::Tag(s) => {
+                file.tags.contains(s)
+            }
         }
     }
 }
@@ -103,8 +113,8 @@ fn test_query() {
                 Term::Tag(String::from("owo")),
             ],
             excludes: vec![
-                Term::NormalFuzzy(String::from("qux")),
-                Term::NormalFuzzy(String::from("aaa bbb")),
+                Term::Exact(String::from("qux")),
+                Term::Exact(String::from("aaa bbb")),
                 Term::Extension(String::from("md")),
                 Term::Tag(String::from("uwu")),
             ],
@@ -242,6 +252,12 @@ pub fn parse_query(query: &str) -> Result<Query> {
             } else {
                 parse_term(&token).unwrap().1
             };
+
+            // if term is fuzzyterm, turn it into exact
+            let term = match term {
+                Term::NormalFuzzy(term) => Term::Exact(term),
+                _ => term,
+            };
             excludes.push(term);
         } else {
             let (_, term) = parse_term(&token).unwrap();
@@ -278,6 +294,14 @@ pub fn fuzzy_match(query: &Query, idx: &Index) -> Vec<(i64, String)> {
         .iter()
         .map(|file| file.path.to_string_lossy().to_string())
         .collect::<Vec<_>>();
+
+    if includes.is_empty() {
+        // return everything
+        return index
+            .iter()
+            .map(|path| (0, path.to_owned()))
+            .collect::<Vec<_>>();
+    }
 
     // nah lets try fuzzy-matcher
     let matcher = fuzzy_matcher::skim::SkimMatcherV2::default()
@@ -316,30 +340,41 @@ pub fn query(query: &Query, index: &Index) -> Vec<(i64, IndexedFile)> {
     // println!("{:#?}", matches);
 
     // now we can map it into the actual Index struct
-    let mut matches = matches
-        .into_iter()
-        .map(|(score, path)| (score, index.get_file(PathBuf::from(path)).unwrap()))
-        .filter(|(_, file)| {
-            // filter out the rules
-            let mut include = false;
-            for term in &query.excludes {
-                if term.match_rules(file) {
-                    return false;
-                }
-            }
-            {
-                for term in &query.includes {
-                    if term.match_rules(file) {
-                        include = true;
-                    }
-                }
-            }
-            include
-        })
-        .map(|(score, file)| (score, file.clone()))
-        .collect::<Vec<_>>();
 
     // sort the matches by score
     // matches.sort_by(|a, b| b.0.cmp(&a.0));
     matches
+        .into_iter()
+        .map(|(score, path)| (score, index.get_file(PathBuf::from(path)).unwrap()))
+        .filter(|(_, file)| {
+            // filter out the rules
+            let mut cond = false;
+            {
+                for term in &query.includes {
+                    // ignore if it's a fuzzy term
+                    if let Term::NormalFuzzy(_) = term {
+                        continue;
+                    }
+                    if term.match_rules(file) {
+                        cond = true;
+                        break;
+                    } else {
+                        // If it doesn't match the rules once, it should fail
+                        cond = false;
+                        return cond;
+                    }
+                }
+            }
+
+            for term in &query.excludes {
+                if term.match_rules(file) {
+                    cond = false;
+                    break;
+                }
+            }
+
+            cond
+        })
+        .map(|(score, file)| (score, file.clone()))
+        .collect::<Vec<_>>()
 }

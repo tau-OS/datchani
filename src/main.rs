@@ -4,12 +4,13 @@ mod files;
 mod query;
 
 use std::env;
-use walkdir::WalkDir;
+
 
 use color_eyre::Result;
-use tracing::info;
+use tracing::{info};
+use walkdir::WalkDir;
 
-use crate::query::{fuzzy_match, query};
+use crate::query::{query};
 
 fn main() -> Result<()> {
     // default level is debug
