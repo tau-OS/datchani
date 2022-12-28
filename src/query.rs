@@ -1,12 +1,16 @@
-// Datchani Search Query Parser
-// Tokens are separated by whitespace, except for quoted strings
-// which are treated as a single token.
-// If a token starts with a -, it is treated as an exclusion.
-// Else, it is treated as an inclusion.
-// a normal string is regarded as a fuzzy match
-// If a token contains a :, it is treated as a key:value operation
-// for example, `prefix:foo` will match all files that start with `foo`
-//
+//! Query parser
+//! This module contains the query parser, used to parse search queries.
+//! The query syntax is similar to Google's search syntax, but with some
+//! modifications to make it more suitable for file searching.
+//!
+//! Tokens are separated by whitespace, except for quoted strings
+//! which are treated as a single token.
+//! If a token starts with a -, it is treated as an exclusion.
+//! Else, it is treated as an inclusion.
+//! a normal string is regarded as a fuzzy match
+//! If a token contains a :, it is treated as a key:value operation
+//! for example, `prefix:foo` will match all files that start with `foo`
+//!
 
 //
 // Path: src/query.rs
@@ -25,6 +29,16 @@ use color_eyre::Result;
 
 use crate::files::{Index, IndexedFile};
 
+
+/// A query term
+/// All terms will be parsed as a NormalFuzzy term, unless they start with a reserved keyword, followed by a colon
+/// Which turns them into an operation.
+/// for example, `prefix:foo` will match all files that start with `foo`
+/// `mime:application/pdf` will match all files that have the MIME type `application/pdf`
+/// `tag:foo` will match all files that have the tag `foo`
+/// `regex:/foo/` will match all files that contain `foo`
+/// and so on
+/// If a term starts with a -, it is treated as an exclusion
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Term {
     /// Match by fuzzy search
@@ -43,6 +57,11 @@ pub enum Term {
     Tag(String),
     /// Match by exact string
     Exact(String),
+    /// Regex match
+    /// Regex format will be the same as the one used by ripgrep, but in between slashes
+    /// For example, `/foo/` will match all files that contain `foo`
+    /// `/foo/i` will match all files that contain `foo` case-insensitively
+    Regex(String),
 }
 
 impl Term {
@@ -51,6 +70,11 @@ impl Term {
             Term::NormalFuzzy(_) => {
                 // we have already done the fuzzy matching in the query parser
                 true
+            }
+            Term::Regex(s) => {
+                let name = file.path.file_name().unwrap().to_str().unwrap();
+                let re = regex::Regex::new(s).unwrap();
+                re.is_match(name)
             }
             Term::Exact(s) => {
                 let name = file.path.file_name().unwrap().to_str().unwrap();
@@ -88,9 +112,7 @@ impl Term {
                 }
             }
             Term::Mime(s) => file.data_type == Some(s.clone()),
-            Term::Tag(s) => {
-                file.tags.contains(s)
-            }
+            Term::Tag(s) => file.tags.contains(s),
         }
     }
 }
@@ -131,45 +153,78 @@ pub struct Query {
 // TODO: dedup this please
 
 fn parse_prefix(input: &str) -> IResult<&str, Term> {
-    let (input, _) = tag("prefix:")(input)?;
-    let (input, prefix) = take_while1(|c: char| c.is_alphanumeric() || c == '_')(input)?;
+    // dont skip whitespace or anything that is escaped
+    let (input, _) = alt((
+        tag("prefix:"),
+        tag("pre:"),
+        tag("start:"),
+        tag("starts_with:"),
+        tag("pfx:"),
+    ))(input)?;
+    let (input, prefix) = take_while1(|_| true)(input)?;
 
     Ok((input, Term::Prefix(String::from(prefix))))
 }
 
 fn parse_suffix(input: &str) -> IResult<&str, Term> {
-    let (input, _) = tag("suffix:")(input)?;
-    let (input, suffix) = take_while1(|c: char| c.is_alphanumeric() || c == '_')(input)?;
+    let (input, _) = alt((
+        tag("suffix:"),
+        tag("suf:"),
+        tag("end:"),
+        tag("ends_with:"),
+        tag("sfx:"),
+    ))(input)?;
+    let (input, suffix) = take_while1(|_| true)(input)?;
 
     Ok((input, Term::Suffix(String::from(suffix))))
 }
 
 fn parse_suffix_name(input: &str) -> IResult<&str, Term> {
     let (input, _) = tag("suffix_name:")(input)?;
-    let (input, suffix) = take_while1(|c: char| c.is_alphanumeric() || c == '_')(input)?;
+    let (input, suffix) = take_while1(|_| true)(input)?;
 
     Ok((input, Term::SuffixName(String::from(suffix))))
 }
 
 fn parse_extension(input: &str) -> IResult<&str, Term> {
-    let (input, _) = tag("extension:")(input)?;
-    let (input, extension) = take_while1(|c: char| c.is_alphanumeric() || c == '_')(input)?;
+    let (input, _) = alt((tag("extension:"), tag("ext:"), tag("file:")))(input)?;
+    let (input, extension) = take_while1(|_| true)(input)?;
 
     Ok((input, Term::Extension(String::from(extension))))
 }
 
 fn parse_mime(input: &str) -> IResult<&str, Term> {
     let (input, _) = tag("mime:")(input)?;
-    let (input, mime) = take_while1(|c: char| c.is_alphanumeric() || c == '_')(input)?;
+    let (input, mime) = take_while1(|c: char| c.is_ascii() || c == '_')(input)?;
 
     Ok((input, Term::Mime(String::from(mime))))
 }
 
 fn parse_tag(input: &str) -> IResult<&str, Term> {
-    let (input, _) = tag("#")(input)?;
-    let (input, tag) = take_while1(|c: char| c.is_alphanumeric() || c == '_')(input)?;
+    let (input, _) = alt((tag("#"), tag("tag:"), tag("tags:"), tag("tagged:")))(input)?;
+    let (input, tag) = take_while1(|_| true)(input)?;
 
     Ok((input, Term::Tag(String::from(tag))))
+}
+
+fn parse_exact(input: &str) -> IResult<&str, Term> {
+    let (input, _) = alt((tag("@"), tag("exact:")))(input)?;
+    let (input, exact) = take_while1(|_| true)(input)?;
+
+    Ok((input, Term::Exact(String::from(exact))))
+}
+
+fn parse_regex(input: &str) -> IResult<&str, Term> {
+    let (input, _) = alt((
+        tag("regex:"),
+        tag("re:"),
+        tag("r:"),
+        tag("regexp:"),
+        tag("rgx:"),
+    ))(input)?;
+    let (input, regex) = take_while1(|_| true)(input)?;
+
+    Ok((input, Term::Regex(String::from(regex))))
 }
 
 fn parse_fuzzy(input: &str) -> IResult<&str, Term> {
@@ -177,20 +232,29 @@ fn parse_fuzzy(input: &str) -> IResult<&str, Term> {
     Ok((input, Term::NormalFuzzy(String::from(input))))
 }
 
+/// This function is used to parse a single term from a query.
+/// It will take any string and return a Term enum.
 fn parse_term(input: &str) -> IResult<&str, Term> {
     let (input, term) = alt((
+        parse_regex,
         parse_prefix,
-        parse_suffix,
-        parse_suffix_name,
         parse_extension,
+        parse_suffix_name,
+        parse_suffix,
         parse_mime,
         parse_tag,
+        parse_exact,
         parse_fuzzy,
     ))(input)?;
 
     Ok((input, term))
 }
 
+
+/// This function breaks down a query into a list of tokens,
+/// then looks for a special negation token `-` and then
+/// turns all the tokens into a Query struct.
+/// The terms will be sorted by whether they are negated or not.
 pub fn parse_query(query: &str) -> Result<Query> {
     let mut includes = Vec::new();
     let mut excludes = Vec::new();
@@ -242,7 +306,7 @@ pub fn parse_query(query: &str) -> Result<Query> {
         buf.push(token_buf);
     }
 
-    // println!("{:#?}", buf);
+    println!("{:#?}", buf);
 
     // parse the tokens
     for token in buf {
@@ -270,6 +334,8 @@ pub fn parse_query(query: &str) -> Result<Query> {
 
 // let's use skim to match the queries
 
+/// This function does the actual fuzzy matching of the query.
+/// If there are no fuzzy terms, it will return everything.
 pub fn fuzzy_match(query: &Query, idx: &Index) -> Vec<(i64, String)> {
     // println!("Loaded index: {:#?}", file);
     // get the NormalFuzzy terms
@@ -334,15 +400,13 @@ pub fn fuzzy_match(query: &Query, idx: &Index) -> Vec<(i64, String)> {
 }
 
 // The actual query function
+/// This is the main entrypoint for querying the index.
+/// It will first try to fuzzy match the query, them finally
+/// filters them by the rules provided in the Term enum.
 pub fn query(query: &Query, index: &Index) -> Vec<(i64, IndexedFile)> {
     // first, let's try to match the query with fuzzy matching
     let matches = fuzzy_match(query, index);
-    // println!("{:#?}", matches);
 
-    // now we can map it into the actual Index struct
-
-    // sort the matches by score
-    // matches.sort_by(|a, b| b.0.cmp(&a.0));
     matches
         .into_iter()
         .map(|(score, path)| (score, index.get_file(PathBuf::from(path)).unwrap()))
@@ -351,13 +415,13 @@ pub fn query(query: &Query, index: &Index) -> Vec<(i64, IndexedFile)> {
             let mut cond = false;
             {
                 for term in &query.includes {
-                    // ignore if it's a fuzzy term
+                    // we have already fuzzy matched, so we can skip fuzzy terms
+                    // the reason we do not fuzzy match in here is because we need to also return a score
                     if let Term::NormalFuzzy(_) = term {
                         continue;
                     }
                     if term.match_rules(file) {
                         cond = true;
-                        break;
                     } else {
                         // If it doesn't match the rules once, it should fail
                         cond = false;
@@ -365,13 +429,18 @@ pub fn query(query: &Query, index: &Index) -> Vec<(i64, IndexedFile)> {
                     }
                 }
             }
-
+            // if in any case it fails, we should return false
             for term in &query.excludes {
                 if term.match_rules(file) {
                     cond = false;
-                    break;
+                    return cond;
                 }
             }
+
+
+            // Failsafe in case there's nothing in the query
+            // we return nothing
+            // or if its still true, we include it
 
             cond
         })

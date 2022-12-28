@@ -7,7 +7,7 @@ use std::env;
 
 
 use color_eyre::Result;
-use tracing::{info};
+use tracing::{info, debug};
 use walkdir::WalkDir;
 
 use crate::query::{query};
@@ -53,7 +53,8 @@ fn main() -> Result<()> {
 
     // let f = files::Index::load(env::current_dir().unwrap().join("index.json"))?;
     // debug!("Loaded index: {:#?}", f);
-    let search_query = query::parse_query("release extension:rlib").unwrap();
+    let search_query = query::parse_query("release file:rlib @\"r a\"").unwrap();
+    debug!("Parsed query: {:#?}", search_query);
     let res = query(&search_query, &index);
     println!("{:#?}", res);
     Ok(())
