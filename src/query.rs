@@ -29,7 +29,6 @@ use color_eyre::Result;
 
 use crate::files::{Index, IndexedFile};
 
-
 /// A query term
 /// All terms will be parsed as a NormalFuzzy term, unless they start with a reserved keyword, followed by a colon
 /// Which turns them into an operation.
@@ -250,7 +249,6 @@ fn parse_term(input: &str) -> IResult<&str, Term> {
     Ok((input, term))
 }
 
-
 /// This function breaks down a query into a list of tokens,
 /// then looks for a special negation token `-` and then
 /// turns all the tokens into a Query struct.
@@ -306,7 +304,7 @@ pub fn parse_query(query: &str) -> Result<Query> {
         buf.push(token_buf);
     }
 
-    println!("{:#?}", buf);
+    // println!("{:#?}", buf);
 
     // parse the tokens
     for token in buf {
@@ -332,11 +330,42 @@ pub fn parse_query(query: &str) -> Result<Query> {
     Ok(Query { includes, excludes })
 }
 
+/// Make a fuzzy match score depending on the Query
+
+pub fn fuzzy_score(query: &Query, ixf: IndexedFile) -> Result<(i64, IndexedFile)> {
+    let includes = query
+        .includes
+        .iter()
+        .filter_map(|term| match term {
+            Term::NormalFuzzy(term) => Some(term),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    let matcher = fuzzy_matcher::skim::SkimMatcherV2::default()
+        .smart_case()
+        .use_cache(true)
+        .debug(false);
+
+    let mut score: i64 = 0;
+
+    for term in includes {
+        let mut max_score = 0;
+        let path = ixf.path.clone();
+        if let Some(score) = matcher.fuzzy_match(path.to_str().unwrap(), term) {
+            max_score = score;
+        }
+        score += max_score;
+    }
+
+    Ok((score, ixf))
+}
+
 // let's use skim to match the queries
 
 /// This function does the actual fuzzy matching of the query.
 /// If there are no fuzzy terms, it will return everything.
-pub fn fuzzy_match(query: &Query, idx: &Index) -> Vec<(i64, String)> {
+pub fn fuzzy_match(query: &Query, idx: &Index) -> Vec<(i64, IndexedFile)> {
     // println!("Loaded index: {:#?}", file);
     // get the NormalFuzzy terms
     let (includes, _excludes): (Vec<_>, Vec<_>) = query
@@ -355,45 +384,23 @@ pub fn fuzzy_match(query: &Query, idx: &Index) -> Vec<(i64, String)> {
     // println!("includes: {:#?}", includes);
 
     // turn the index into a vec of strings
-    let index = idx
-        .files
-        .iter()
-        .map(|file| file.path.to_string_lossy().to_string())
-        .collect::<Vec<_>>();
 
     if includes.is_empty() {
         // return everything
-        return index
-            .iter()
-            .map(|path| (0, path.to_owned()))
-            .collect::<Vec<_>>();
+        return idx.files.iter().map(|f| (0, f.clone())).collect();
     }
-
-    // nah lets try fuzzy-matcher
-    let matcher = fuzzy_matcher::skim::SkimMatcherV2::default()
-        .smart_case()
-        .debug(false);
 
     // return a sorted list of matches, excluding the ones that do not match
     let mut matches = BTreeMap::new();
 
-    for term in includes {
-        for item in &index {
-            let mat = matcher.fuzzy_match(item, term);
-            if let Some(score) = mat {
-                matches
-                    .entry(item)
-                    .and_modify(|v| *v += score)
-                    .or_insert(score);
-            }
-        }
+    // use fuzzy_score to score the matches
+    for file in idx.files.iter() {
+        let (score, _) = fuzzy_score(query, file.clone()).unwrap();
+        matches.insert(file.to_owned(), score);
     }
 
     // sort matches by score
-    let mut matches = matches
-        .into_iter()
-        .map(|(k, v)| (v, k.to_owned()))
-        .collect::<Vec<_>>();
+    let mut matches = matches.into_iter().map(|(k, v)| (v, k)).collect::<Vec<_>>();
     matches.sort_by(|a, b| b.0.cmp(&a.0));
     // println!("{:#?}", matches);
     matches
@@ -409,17 +416,11 @@ pub fn query(query: &Query, index: &Index) -> Vec<(i64, IndexedFile)> {
 
     matches
         .into_iter()
-        .map(|(score, path)| (score, index.get_file(PathBuf::from(path)).unwrap()))
         .filter(|(_, file)| {
             // filter out the rules
             let mut cond = false;
             {
                 for term in &query.includes {
-                    // we have already fuzzy matched, so we can skip fuzzy terms
-                    // the reason we do not fuzzy match in here is because we need to also return a score
-                    if let Term::NormalFuzzy(_) = term {
-                        continue;
-                    }
                     if term.match_rules(file) {
                         cond = true;
                     } else {
@@ -437,13 +438,12 @@ pub fn query(query: &Query, index: &Index) -> Vec<(i64, IndexedFile)> {
                 }
             }
 
-
             // Failsafe in case there's nothing in the query
             // we return nothing
             // or if its still true, we include it
 
             cond
         })
-        .map(|(score, file)| (score, file.clone()))
+        .map(|(score, file)| (score, file))
         .collect::<Vec<_>>()
 }

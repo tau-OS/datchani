@@ -31,7 +31,6 @@ where
     }
 }
 
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IndexMetadata {
     pub version: String,
@@ -57,7 +56,6 @@ impl Index {
         }
     }
 
-
     pub fn get_file(&self, path: PathBuf) -> Option<&IndexedFile> {
         self.files.iter().find(|f| f.path == path)
     }
@@ -81,7 +79,7 @@ impl Index {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 pub struct IndexedFile {
     pub path: PathBuf,
     // We are skipping this, but for some reason serde wants a default value
@@ -110,15 +108,14 @@ impl Default for IndexedFile {
 
 impl IndexedFile {
     pub fn new(path: PathBuf) -> Result<Self> {
-        let file_type = FileType::from_path(&path)?;
+        let file_type = FileType::from_path(&path).map_err(Report::from)?;
         let data_type = {
-            let d = if file_type == FileType::Regular {
-                let data_type = infer::get_from_path(&path)?;
-                Some(data_type)
-            } else {
-                None
-            };
-
+            // let d = if file_type == FileType::Regular {
+            //     infer::get_from_path(&path).ok()
+            // } else {
+            //     None
+            // };
+            let d: Option<Option<infer::Type>> = None;
             d.map(|t| {
                 t.map(|t| t.to_string())
                     .unwrap_or_else(|| "application/octet-stream".to_string())

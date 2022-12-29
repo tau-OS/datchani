@@ -3,16 +3,21 @@ mod errors;
 mod files;
 mod query;
 
-use std::env;
+use std::{
+    env,
+    sync::{Arc, Mutex, RwLock},
+};
 
-
+use crate::query::query;
 use color_eyre::Result;
-use tracing::{info, debug};
+use ignore::WalkState;
+use rayon::prelude::*;
+use tracing::{debug, info, log::warn};
 use walkdir::WalkDir;
 
-use crate::query::{query};
-
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
+    color_eyre::install()?;
     // default level is debug
     pretty_env_logger::formatted_builder()
         .parse_filters(
@@ -26,9 +31,8 @@ fn main() -> Result<()> {
 
     // global rayon thread
     rayon::ThreadPoolBuilder::new()
-        .num_threads(25)
-        .build_global()
-        .unwrap();
+        .num_threads(4)
+        .build_global()?;
 
     // lets walk dir
     // let walker = WalkDir::new(env::current_dir().unwrap());
@@ -37,25 +41,63 @@ fn main() -> Result<()> {
     //     debug!("Found entry: {:?}", entry);
     // }
 
+    let args = env::args().collect::<Vec<String>>()[1..].to_vec().join(" ");
+
     // use rayon to parallelize the walk
 
-    let mut index = files::Index::new();
-    let walker = WalkDir::new(env::current_dir().unwrap())
-        .into_iter()
-        .filter_map(|e| e.ok());
-    walker.into_iter().for_each(|entry| {
-        // add to data, but this is rayon so it's not thread safe
-        // debug!("Found entry: {:?}", entry);
-        index.add_file(entry.path().to_path_buf()).unwrap();
-    });
+    let index = Arc::new(RwLock::new(files::Index::new()));
 
-    // index.save(env::current_dir().unwrap().join("index.json"))?;
+    ignore::WalkBuilder::new(env::current_dir().unwrap())
+        .git_ignore(true)
+        .git_exclude(true)
+        .ignore(true)
+        .require_git(false)
+        // .same_file_system(true)
+        .hidden(true)
+        .standard_filters(true)
+        .build_parallel()
+        .run(|| {
+            Box::new(|entry| {
+                if entry.is_err() {
+                    return WalkState::Continue;
+                }
+                let entry = entry.unwrap();
+
+                if index.write().is_err() {
+                    return WalkState::Continue;
+                }
+                let mut index = index.write().unwrap();
+                // debug!("Found entry: {:?}", entry);
+                index
+                    .add_file(entry.path().to_path_buf())
+                    .unwrap_or_else(|e| {
+                        warn!("Error adding file: {:?}", e);
+                    });
+                WalkState::Continue
+            })
+        });
+    // WalkDir::new("/home/cappy/Projects")
+    //     .into_iter()
+    //     .par_bridge()
+    //     .for_each(|entry| {
+    //         let entry = entry.unwrap();
+    //         let mut index = index.write().unwrap();
+    //         debug!("Found entry: {:?}", entry);
+    //         index.add_file(entry.path().to_path_buf()).unwrap();
+    //     });
+
+    // info!("Index: {:#?}", index);
+
+    // index
+    //     .read()
+    //     .unwrap()
+    //     .save(env::current_dir().unwrap().join("index.json"))?;
 
     // let f = files::Index::load(env::current_dir().unwrap().join("index.json"))?;
     // debug!("Loaded index: {:#?}", f);
-    let search_query = query::parse_query("release file:rlib @\"r a\"").unwrap();
+    let search_query = query::parse_query(&args).unwrap();
     debug!("Parsed query: {:#?}", search_query);
-    let res = query(&search_query, &index);
+    let res = query(&search_query, &index.read().unwrap());
     println!("{:#?}", res);
     Ok(())
 }
