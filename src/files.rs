@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use color_eyre::{Report, Result};
 use file_type_enum::FileType;
 use serde::{Deserialize, Serialize};
@@ -14,6 +15,12 @@ where
     serializer.serialize_str(&file_type.to_string())
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QueryResult {
+    pub file: IndexedFile,
+    pub score: i64,
+}
+
 fn filetype_deserializer<'de, D>(deserializer: D) -> Result<FileType, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -23,8 +30,8 @@ where
         "regular file" => Ok(FileType::Regular),
         "directory" => Ok(FileType::Directory),
         "symlink" => Ok(FileType::Symlink),
-        "block_device" => Ok(FileType::BlockDevice),
-        "char_device" => Ok(FileType::CharDevice),
+        "block device" => Ok(FileType::BlockDevice),
+        "char device" => Ok(FileType::CharDevice),
         "fifo" => Ok(FileType::Fifo),
         "socket" => Ok(FileType::Socket),
         _ => Err(serde::de::Error::custom("Invalid file type")),
@@ -93,6 +100,8 @@ pub struct IndexedFile {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub data_type: Option<String>,
     pub tags: Vec<String>,
+    pub last_modified: DateTime<Utc>,
+    pub last_indexed: DateTime<Utc>,
 }
 
 impl Default for IndexedFile {
@@ -102,6 +111,8 @@ impl Default for IndexedFile {
             file_type: FileType::Regular,
             data_type: None,
             tags: Vec::new(),
+            last_modified: DateTime::default(),
+            last_indexed: Utc::now(),
         }
     }
 }
@@ -110,11 +121,6 @@ impl IndexedFile {
     pub fn new(path: PathBuf) -> Result<Self> {
         let file_type = FileType::from_path(&path).map_err(Report::from)?;
         let data_type = {
-            // let d = if file_type == FileType::Regular {
-            //     infer::get_from_path(&path).ok()
-            // } else {
-            //     None
-            // };
             let d: Option<Option<infer::Type>> = None;
             d.map(|t| {
                 t.map(|t| t.to_string())
@@ -122,11 +128,16 @@ impl IndexedFile {
             })
         };
 
+        let last_modified: chrono::DateTime<Utc> = path.metadata()?.modified()?.into();
+
         Ok(Self {
             path,
             file_type,
             data_type,
             tags: Vec::new(),
+            last_modified,
+
+            ..Default::default()
         })
     }
 

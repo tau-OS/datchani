@@ -2,6 +2,7 @@ mod db;
 mod errors;
 mod files;
 mod query;
+mod indexer;
 
 use std::{
     env,
@@ -58,15 +59,15 @@ async fn main() -> Result<()> {
         .build_parallel()
         .run(|| {
             Box::new(|entry| {
-                if entry.is_err() {
-                    return WalkState::Continue;
-                }
-                let entry = entry.unwrap();
+                let entry = match entry {
+                    Ok(e) => e,
+                    Err(e) => return WalkState::Continue
+                };
+                let mut index = match index.write() {
+                    Ok(i) => i,
+                    Err(e) => return WalkState::Continue
+                };
 
-                if index.write().is_err() {
-                    return WalkState::Continue;
-                }
-                let mut index = index.write().unwrap();
                 // debug!("Found entry: {:?}", entry);
                 index
                     .add_file(entry.path().to_path_buf())

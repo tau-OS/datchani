@@ -9,7 +9,7 @@ description = "A Certain Magical Indexer"
 
 [dependencies]
 anyhow = "1.0.68"
-chrono = "0.4.23"
+chrono = { version = "0.4.23", features = ["serde"] }
 color-eyre = "0.6.2"
 rayon = "1.6.1"
 serde = { version = "1.0.152", features = ["serde_derive", "derive"] }
@@ -26,3 +26,13 @@ nom = "7.1.1"
 fuzzy-matcher = "0.3.7"
 regex = "1.7.0"
 ignore = "0.4.18"
+cached = "0.41.0"
+async-trait = "0.1.60"
+surrealdb-rs = { git = "https://github.com/surrealdb/surrealdb.rs", version = "0.1.0" }
+
+
+[dependencies.surrealdb]
+default-features = false
+version = "1.0.0-beta.8"
+features = ["kv-mem", "parallel", "scripting", "kv-rocksdb"]
+git = "https://github.com/surrealdb/surrealdb.git"
