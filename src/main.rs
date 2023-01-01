@@ -3,6 +3,7 @@ mod errors;
 mod files;
 mod query;
 mod indexer;
+mod tags;
 
 use std::{
     env,

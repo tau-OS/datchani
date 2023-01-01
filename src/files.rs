@@ -73,6 +73,8 @@ impl Index {
         Ok(())
     }
 
+    /// Save to JSON file
+    /// Note: this shouldn't be used
     pub fn save(&self, path: PathBuf) -> Result<()> {
         let file = File::create(path)?;
         serde_json::to_writer_pretty(file, self)?;

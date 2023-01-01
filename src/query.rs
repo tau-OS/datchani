@@ -61,6 +61,12 @@ pub enum Term {
     /// For example, `/foo/` will match all files that contain `foo`
     /// `/foo/i` will match all files that contain `foo` case-insensitively
     Regex(String),
+    /// Modified before
+    /// Matches all files that were modified before the given date
+    Before(String),
+    /// Modified after
+    /// Matches all files that were modified after the given date
+    After(String),
 }
 
 impl Term {
@@ -112,6 +118,7 @@ impl Term {
             }
             Term::Mime(s) => file.data_type == Some(s.clone()),
             Term::Tag(s) => file.tags.contains(s),
+            _ => todo!(),
         }
     }
 }
@@ -226,6 +233,20 @@ fn parse_regex(input: &str) -> IResult<&str, Term> {
     Ok((input, Term::Regex(String::from(regex))))
 }
 
+fn parse_before(input: &str) -> IResult<&str, Term> {
+    let (input, _) = tag("before:")(input)?;
+    let (input, before) = take_while1(|_| true)(input)?;
+
+    Ok((input, Term::Before(String::from(before))))
+}
+
+fn parse_after(input: &str) -> IResult<&str, Term> {
+    let (input, _) = tag("after:")(input)?;
+    let (input, after) = take_while1(|_| true)(input)?;
+
+    Ok((input, Term::After(String::from(after))))
+}
+
 fn parse_fuzzy(input: &str) -> IResult<&str, Term> {
     // do nothing and just return the input
     Ok((input, Term::NormalFuzzy(String::from(input))))
@@ -240,6 +261,8 @@ fn parse_term(input: &str) -> IResult<&str, Term> {
         parse_extension,
         parse_suffix_name,
         parse_suffix,
+        parse_before,
+        parse_after,
         parse_mime,
         parse_tag,
         parse_exact,
