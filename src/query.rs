@@ -16,7 +16,9 @@
 // Path: src/query.rs
 
 use std::{collections::BTreeMap, path::PathBuf};
+use futures_core::stream::Stream;
 
+use async_stream::stream;
 use fuzzy_matcher::FuzzyMatcher;
 // let's use nom to parse the query, and skim to do the fuzzy matching
 use nom::{
@@ -384,6 +386,41 @@ pub fn fuzzy_score(query: &Query, ixf: IndexedFile) -> Result<(i64, IndexedFile)
     Ok((score, ixf))
 }
 
+// New fuzzy match to score each entry individually
+/// Evaluate the score of the file based on the query
+pub fn eval_score(query: &Query, ixf: IndexedFile) -> Result<Option<(i64, IndexedFile)>> {
+    // do fuzzy score first
+    let (score, file) = fuzzy_score(query, ixf.clone())?;
+
+    // then do the filters
+    let mut cond = false;
+
+    {
+        for term in &query.includes {
+            if term.match_rules(&file) {
+                cond = true;
+            } else {
+                // If it doesn't match the rules once, it should fail
+                // cond = false;
+                return Ok(None);
+            }
+        }
+    }
+    // if in any case it fails, we should return false
+    for term in &query.excludes {
+        if term.match_rules(&file) {
+            // cond = false;
+            return Ok(None);
+        }
+    }
+
+    if cond {
+        Ok(Some((score, file)))
+    } else {
+        Ok(None)
+    }
+}
+
 // let's use skim to match the queries
 
 /// This function does the actual fuzzy matching of the query.
@@ -435,38 +472,34 @@ pub fn fuzzy_match(query: &Query, idx: &Index) -> Vec<(i64, IndexedFile)> {
 /// filters them by the rules provided in the Term enum.
 pub fn query(query: &Query, index: &Index) -> Vec<(i64, IndexedFile)> {
     // first, let's try to match the query with fuzzy matching
-    let matches = fuzzy_match(query, index);
 
-    matches
-        .into_iter()
-        .filter(|(_, file)| {
-            // filter out the rules
-            let mut cond = false;
-            {
-                for term in &query.includes {
-                    if term.match_rules(file) {
-                        cond = true;
-                    } else {
-                        // If it doesn't match the rules once, it should fail
-                        cond = false;
-                        return cond;
-                    }
-                }
+    let mut scored_index = index
+        .files
+        .iter()
+        .map(|f| eval_score(query, f.to_owned()))
+        .filter(|f| f.is_ok())
+        .filter(|f| f.as_ref().unwrap().is_some())
+        .map(|f| f.unwrap().unwrap())
+        .collect::<Vec<_>>();
+
+    // sort matches by score
+    scored_index.sort_by(|a, b| b.0.cmp(&a.0));
+    // reverse the order
+    scored_index.reverse();
+    scored_index
+}
+
+
+// Query, but stream the results instead of collecting them
+/// Streaming version of the query function.
+pub fn query_stream(query: Query, index: Index) -> impl Stream<Item = (i64, IndexedFile)> {
+    // first, let's try to match the query with fuzzy matching
+    let s = stream! {
+        for file in index.files.iter() {
+            if let Ok(Some((score, file))) = eval_score(&query, file.to_owned()) {
+                yield (score, file);
             }
-            // if in any case it fails, we should return false
-            for term in &query.excludes {
-                if term.match_rules(file) {
-                    cond = false;
-                    return cond;
-                }
-            }
-
-            // Failsafe in case there's nothing in the query
-            // we return nothing
-            // or if its still true, we include it
-
-            cond
-        })
-        .map(|(score, file)| (score, file))
-        .collect::<Vec<_>>()
+        }
+    };
+    s
 }

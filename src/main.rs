@@ -10,8 +10,9 @@ use std::{
     sync::{Arc, Mutex, RwLock},
 };
 
-use crate::query::query;
+use crate::query::{query, query_stream};
 use color_eyre::Result;
+use futures_util::{pin_mut, StreamExt};
 use ignore::WalkState;
 use rayon::prelude::*;
 use tracing::{debug, info, log::warn};
@@ -99,7 +100,12 @@ async fn main() -> Result<()> {
     // debug!("Loaded index: {:#?}", f);
     let search_query = query::parse_query(&args).unwrap();
     debug!("Parsed query: {:#?}", search_query);
-    let res = query(&search_query, &index.read().unwrap());
-    println!("{:#?}", res);
+    let res = query_stream(search_query, index.read().unwrap().to_owned());
+    pin_mut!(res);
+
+    while let Some(r) = res.next().await {
+        println!("{:#?}", r);
+    }
+    // println!("{:#?}", res);
     Ok(())
 }

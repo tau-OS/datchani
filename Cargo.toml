@@ -30,6 +30,9 @@ cached = "0.41.0"
 async-trait = "0.1.60"
 surrealdb-rs = { git = "https://github.com/surrealdb/surrealdb.rs", version = "0.1.0" }
 xattr = "1.0.0"
+async-stream = "0.3.3"
+futures-core = "0.3.25"
+futures-util = "0.3.25"
 
 
 [dependencies.surrealdb]
