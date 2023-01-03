@@ -30,8 +30,6 @@ async fn main() -> Result<()> {
         )
         .init();
 
-    info!("Hello, world!");
-
     // global rayon thread
     rayon::ThreadPoolBuilder::new()
         .num_threads(4)

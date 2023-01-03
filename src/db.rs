@@ -36,13 +36,14 @@ impl SurrealBackend {
 impl IndexBackend for SurrealBackend {
     async fn push_file(&mut self, entry: IndexedFile) -> Result<IndexedFile> {
         // println!("{:?}", a);
-        let res: IndexedFile = self.0.create(("file", entry.clone().path.to_str().unwrap())).content::<IndexedFile>(entry).await?;
+        let res: IndexedFile = self.0.update(("file", entry.clone().path.to_str().unwrap())).content::<IndexedFile>(entry).await?;
         Ok(res)
     }
 
     async fn query(&mut self, q: &Query) -> Result<()> {
-        let mut results = self.0.query(sql!(SELECT * FROM file)).await?;
-        let res: Vec<IndexedFile> = results.take(0)?;
+        let mut results = self.0.select("file").await?;
+
+        let res: Vec<IndexedFile> = results;
 
         // println!("{:#?}", res);
         // ! TEMP

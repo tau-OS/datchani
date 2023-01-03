@@ -116,6 +116,11 @@ impl Indexer {
 #[tokio::test]
 async fn test_indexer() -> Result<()> {
     color_eyre::install()?;
+    pretty_env_logger::formatted_builder()
+        .parse_filters(
+           "debug"
+        )
+        .init();
     let mut indexer = Indexer {
         backend: Box::new(crate::db::SurrealBackend::new().await?),
     };
