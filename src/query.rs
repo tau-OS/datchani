@@ -15,8 +15,8 @@
 //
 // Path: src/query.rs
 
-use std::{collections::BTreeMap, path::PathBuf};
 use futures_core::stream::Stream;
+use std::{collections::BTreeMap, path::PathBuf};
 
 use async_stream::stream;
 use fuzzy_matcher::FuzzyMatcher;
@@ -421,51 +421,6 @@ pub fn eval_score(query: &Query, ixf: IndexedFile) -> Result<Option<(i64, Indexe
     }
 }
 
-// let's use skim to match the queries
-
-/// This function does the actual fuzzy matching of the query.
-/// If there are no fuzzy terms, it will return everything.
-pub fn fuzzy_match(query: &Query, idx: &Index) -> Vec<(i64, IndexedFile)> {
-    // println!("Loaded index: {:#?}", file);
-    // get the NormalFuzzy terms
-    let (includes, _excludes): (Vec<_>, Vec<_>) = query
-        .includes
-        .iter()
-        .filter_map(|term| match term {
-            Term::NormalFuzzy(term) => Some(term),
-            _ => None,
-        })
-        .partition(|term| {
-            !query
-                .excludes
-                .contains(&Term::NormalFuzzy(term.to_string()))
-        });
-
-    // println!("includes: {:#?}", includes);
-
-    // turn the index into a vec of strings
-
-    if includes.is_empty() {
-        // return everything
-        return idx.files.iter().map(|f| (0, f.clone())).collect();
-    }
-
-    // return a sorted list of matches, excluding the ones that do not match
-    let mut matches = BTreeMap::new();
-
-    // use fuzzy_score to score the matches
-    for file in idx.files.iter() {
-        let (score, _) = fuzzy_score(query, file.clone()).unwrap();
-        matches.insert(file.to_owned(), score);
-    }
-
-    // sort matches by score
-    let mut matches = matches.into_iter().map(|(k, v)| (v, k)).collect::<Vec<_>>();
-    matches.sort_by(|a, b| b.0.cmp(&a.0));
-    // println!("{:#?}", matches);
-    matches
-}
-
 // The actual query function
 /// This is the main entrypoint for querying the index.
 /// It will first try to fuzzy match the query, them finally
@@ -488,7 +443,6 @@ pub fn query(query: &Query, index: &Index) -> Vec<(i64, IndexedFile)> {
     scored_index.reverse();
     scored_index
 }
-
 
 // Query, but stream the results instead of collecting them
 /// Streaming version of the query function.
